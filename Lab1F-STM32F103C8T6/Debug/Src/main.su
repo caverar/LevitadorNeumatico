@@ -1,0 +1,2 @@
+main.c:33:5:main	32	static
+main.c:268:6:wait_us	16	static
