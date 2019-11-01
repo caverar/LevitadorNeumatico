@@ -3,31 +3,48 @@
 #include <stm32f103xb.h>
 #include <stdlib.h>
 
+//#define motorOut TIM3->CCR4
 unsigned short value=0;
-unsigned int indexRX=0;
-unsigned int indexTX=1;
+unsigned int indexUsartRX3=0;
+unsigned int indexUsartTX1=1;
 
 
-int inUSARTdata;
+int inUSARTdata1;
+int inUSARTdata3;
 int L;
-int Ldata[10];
-int Ldatai=0, Ldataj=0;
-int USART1index=0;
-int RXaux;
+float sensorInputData;
+int PWMzero=890;
+int PWMmax=950;
+float sensorInputDataOffSet;
+float sensorInputDataArray[10];		
+unsigned int sensorInputDataArrayPointeri=0, sensorInputDataArrayPointerj=0;
+unsigned int USART1index=0;
+unsigned int sendDataUartFlag=0;
+int sensorInputDataTemp;
 
 // Variables controlador
-float kp=2; //3.9
+float kp=0.23; 
 float ki=0;
 float kd=0;
+float error=0;
+float sum=0;
+unsigned int Ts=50;
 
-float pastError;
-int ref=150;
+// para ref (300) kp=0.2
+// para ref (100,250) kp=0.23
+// para ref (50) kp=0.4
+
+float pastError=0;
+int ref=300;
+int newRef=200;
 float out=0;
 unsigned short refOffSet=100;
 
 unsigned int Ti=0;
+unsigned int initLoopCounter=0;
 
-
+void controlLoop(void);
+void initializationLoop(void);
 void wait_us(unsigned int time);
 
 int main(void){
@@ -50,7 +67,7 @@ int main(void){
     RCC->CFGR |= RCC_CFGR_SW_1;    							// SW=2, PLL seleccionado como reloj del sistema
     while(!(RCC->CFGR & RCC_CFGR_SWS_PLL)); 				// SWS=2? , Esperar a que el reloj del sistema se configure
 
-	//--C13
+	//--PC13
     RCC->APB2ENR |=RCC_APB2ENR_IOPCEN;						// IOPCEN=1, Habilitar reloj del Puerto A
     GPIOC->CRH = 0;											// Limpiar el puerto C
     GPIOC->CRH &= GPIO_CRH_MODE13;							// MODE10=0x11, PC13 en modo de salida
@@ -90,7 +107,7 @@ int main(void){
 	GPIOB->CRL |= GPIO_CRL_CNF1_1;							// CNF1=0b10, PB1 Modo alternado	 push-pull
 
 
-	// COnfiguracion
+	// Configuracion
 	TIM3->CCER |= TIM_CCER_CC4E;							// Habilitar canal 4
 	TIM3->CR1 |= TIM_CR1_ARPE;								// Habilitar Auto recarga de valor precarga
 	TIM3->CCMR2|=TIM_CCMR2_OC4M_2+TIM_CCMR2_OC4M_1;			// AJustar modo PWM1 en canal 4
@@ -125,143 +142,76 @@ int main(void){
 
 	//	Primera transmision (vacia)
 
-	USART1->DR = (0x04);									// Datos TX UART1
+	USART1->DR = (0x04);									// Primera transmision basura
 	while(!(USART1->SR & USART_SR_TC)); 					// TC=1? Esperar a que se complete la transmision
+	
+
+	//--Inicialización UART3-------------------------------------------------------------------------------
+
+	RCC->APB1ENR |= RCC_APB1ENR_USART3EN; 					// USART3EN=1, Activación de reloj UART3
+	USART3->CR1 |= USART_CR1_UE;       						// UE=1, Activación UART3
+	USART3->CR1 &= ~USART_CR1_M;  							// M=0, Tamaño de palabra 8 bits
+	USART3->CR2 &= ~USART_CR2_STOP;    						// STOP=0, Seleccionar el número de bits de parada
+
+	//	Inicializacion de pines (GPIOA)
+
+	GPIOB->CRH  = 0;
+	GPIOB->CRH |= GPIO_CRH_MODE10_0;   						// MODE10 = 01, PB10 como salida a 10 MHz
+	GPIOB->CRH |= GPIO_CRH_CNF10_1;    						// CNF10 = 10, PB10 como salida push pull alternada (salida de periferico)
+	GPIOB->CRH &= ~GPIO_CRH_MODE11;    						// MODE11 = 00, PB11 como entrada
+	GPIOB->CRH |= GPIO_CRH_CNF11_1;    						// CNF11 = 10, PB11 como entrada push pull
+
+	//	Baudios 9600, Baudios = 36MHz/16*USARTDIV, USARTDIV = 234,375
+
+	USART3->BRR = (0x0EA6); 								// Parte entera y decimal del preescaler de Baudios
+	USART3->CR1 |= USART_CR1_TE;							// TE=1, Habilitar transmisor
+	USART3->CR1 |= USART_CR1_RE;							// RE=1, Habilitar receptor
+	//USART1->CR1 |= USART_CR1_RXNEIE;						// RXNEIE=1, Habilitar interrupciones de recepcion
+
+	//	Primera transmision (vacia)
+
+	USART3->DR = (0x04);									// Primera transmision basura
+	while(!(USART3->SR & USART_SR_TC)); 					// TC=1? Esperar a que se complete la transmision
+
+	// Inicializacion boton de ajuste referencia
 
 
+	GPIOB->CRH &= ~GPIO_CRH_MODE12;							// MODE12=0b00, PB12 en modo de entrada
+	GPIOB->CRH |= GPIO_CRH_CNF12_1;							// CNF12=0b10, PB12 en modo de de Pull-up, Pull-down
+	GPIOB->ODR |= GPIO_ODR_ODR12;							// Activar resistencia de Pull-Up
 //-----------------------------------------------------------------------------------------------------
 
-
-	TIM3->CCR4 =1023;
-	//TIM3->CCR4 =1023;
-
-	USART1->DR ='L';										// Datos TX UART1
-	//TIM3->CCR4 =0;
-
+	TIM3->CCR4 =PWMzero;									// Iniciar con el ventilador apagado
 	//NVIC_EnableIRQ(USART1_IRQn);							// Habilitar interrupcion de USART1
+
 	while(1){
-
-		if(USART1->SR & USART_SR_RXNE){						// Recepcion
-			inUSARTdata=USART1->DR;
-			switch(indexRX){
-				case 0:
-					if(inUSARTdata==0x01) indexRX++;
-					break;
-				case 1:
-					if(inUSARTdata==0x01) indexRX++;
-					break;
-				case 2:
-					RXaux=inUSARTdata<<8;
-					indexRX++;
-					break;
-				case 3:
-					L=RXaux+inUSARTdata;
-					L=L;
-
-					// Filtro
-//					Ldata[Ldatai]=L;
-//						L=0;
-//					for(int i=0;i<10;i++){
-//						L+=Ldata[i]/10;
-//					}
-//					Ldatai= Ldatai<10 ? Ldatai +1 : 0;
-
-					indexRX=0;
-					break;
-				default:
-					indexRX=0;
-					break;
-			}
-
+		if(initLoopCounter<50){
+			initializationLoop();
+		}else if(initLoopCounter==50){
+			sensorInputDataOffSet=sensorInputData;
+			while(!(USART1->SR & USART_SR_TC));
+			USART1->DR =0x0A;
+			while(!(USART1->SR & USART_SR_TC));
+			USART1->DR =0x0D;
+			while(!(USART1->SR & USART_SR_TC));
+			USART1->DR ='S';
+			while(!(USART1->SR & USART_SR_TC));
+			USART1->DR ='T';
+			while(!(USART1->SR & USART_SR_TC));
+			USART1->DR ='A';
+			while(!(USART1->SR & USART_SR_TC));
+			USART1->DR ='R';
+			while(!(USART1->SR & USART_SR_TC));
+			USART1->DR ='T';
+			while(!(USART1->SR & USART_SR_TC));
+			USART1->DR =0x0A;
+			while(!(USART1->SR & USART_SR_TC));
+			USART1->DR =0x0D;
+			controlLoop();
+			initLoopCounter++;
+		}else{
+			controlLoop();
 		}
-
-		if(USART1->SR & USART_SR_TC){						// Transmision
-			switch(indexTX){
-				case 0:
-					USART1->DR ='L';
-					indexTX++;
-					break;
-				case 1:
-					USART1->DR ='M';
-					indexTX++;
-					break;
-				case 2:
-					USART1->DR =':';
-					indexTX++;
-					break;
-				case 3:
-					USART1->DR = (L/1000)+48;
-					indexTX++;
-					break;
-				case 4:
-					USART1->DR = ((L%1000)/100)+48;
-					indexTX++;
-					break;
-				case 5:
-					USART1->DR = (((L%1000)%100)/10)+48;
-					indexTX++;
-					break;
-				case 6:
-					USART1->DR = (((L%1000)%100)%10)+48;
-					indexTX++;
-					break;
-				case 7:
-					USART1->DR = 0x0A;
-					indexTX++;
-					break;
-				case 8:
-					USART1->DR = 0x0D;
-					indexTX=0;
-					break;
-				default:
-					indexTX=0;
-					break;
-			}
-		}
-		// Lectura ADC
-		if(ADC1->SR & ADC_SR_EOC){							// EOC=1? Preguntar si ya termino la conversion
-			value=ADC1->DR & ADC_DR_DATA;					// :DATA, Almacenar los datos de la conversion
-			//ref=refOffSet+(value/16);						// Modificacionde referencia
-		};
-
-		// Muestreo 5ms
-		if(SysTick->CTRL & SysTick_CTRL_COUNTFLAG_Msk || Ti==0){
-			SysTick->CTRL &=~SysTick_CTRL_ENABLE_Msk;				// Enable=0, Deshabilitar el contador
-			SysTick->LOAD =(10*9)-1;								// Contador
-			SysTick->CTRL |=SysTick_CTRL_ENABLE_Msk;				// Enable=1, Habilitar contador
-			if(Ti==1000){
-				Ti=0;
-				GPIOC->ODR ^= GPIO_ODR_ODR13;
-
-				// Control PID
-				int aux1= TIM3->CCR4;
-				out= kp*(ref-L)+ ki*(ref-L+pastError)+kd*(ref-L-pastError);
-				pastError+=(ref-L);
-				if(out+aux1 >1023){
-					TIM3->CCR4 = 1023;
-				}else if(out+aux1 <0){
-					TIM3->CCR4 = 0;
-				}else{
-					TIM3->CCR4 += out;
-				}
-
-// 				Control ON_OFF
-//				if( abs(ref-(350-L))>0 ){
-//					if(ref<(450-L)){
-//						TIM3->CCR4 = 700;
-//					}else{
-//						TIM3->CCR4 = 1023;
-//					}
-//				}
-
-			}else{
-				Ti++;
-
-			}
-
-		}
-
-
 
 	}
 }
@@ -275,9 +225,296 @@ void wait_us(unsigned int time){ //455 valor maximo
 }
 
 
+void initializationLoop(void){
+	// Recepcion de datos UART-sensor
+	if(USART3->SR & USART_SR_RXNE){						
+		inUSARTdata3=USART3->DR;
+		switch(indexUsartRX3){
+			case 0:
+				if(inUSARTdata3==0xF0){
+					indexUsartRX3++;
+				}else{
+					indexUsartRX3=0;
+				}
+				break;
+			case 1:
+				if(inUSARTdata3==0xF0){
+					indexUsartRX3++;
+				}else{
+					indexUsartRX3=0;
+				}
+				
+				break;
+			case 2:
+				if(inUSARTdata3==0xF0){
+					indexUsartRX3++;
+				}else{
+					indexUsartRX3=0;
+				}
+				break;
+			case 3:
+				sensorInputDataTemp=0;
+				sensorInputDataTemp=inUSARTdata3<<8;
+				indexUsartRX3++;
+				break;
+			case 4:
+				sensorInputDataTemp+=inUSARTdata3;
+
+				// Filtro
+				sensorInputDataArray[sensorInputDataArrayPointeri]=sensorInputDataTemp;
+				sensorInputDataArrayPointeri = (sensorInputDataArrayPointeri<9) ? sensorInputDataArrayPointeri +1 : 0; 
+				initLoopCounter++;
+				sensorInputData=0;
+				for(int i=0;i<10;i++){
+					sensorInputData+=sensorInputDataArray[i];
+				}
+				sensorInputData=sensorInputData/10;
+
+				indexUsartRX3=0;
+				break;
+			default:
+				indexUsartRX3=0;
+				break;
+		}
+
+	}
+
+	// Transmision de datos UART -UI
+
+	if(USART1->SR & USART_SR_TC){						
+		switch(indexUsartTX1){
+			case 0:
+				USART1->DR ='L';
+				indexUsartTX1++;
+				break;
+			case 1:
+				USART1->DR ='M';
+				indexUsartTX1++;
+				break;
+			case 2:
+				USART1->DR =',';
+				indexUsartTX1++;
+				break;
+			case 3:
+				USART1->DR = ((int)sensorInputData/1000)+48;
+				indexUsartTX1++;
+				break;
+			case 4:
+				USART1->DR = (((int)sensorInputData%1000)/100)+48;
+				indexUsartTX1++;
+				break;
+			case 5:
+				USART1->DR = ((((int)sensorInputData%1000)%100)/10)+48;
+				indexUsartTX1++;
+				break;
+			case 6:
+				USART1->DR = ((((int)sensorInputData%1000)%100)%10)+48;
+				indexUsartTX1++;
+				break;
+			case 7:
+				USART1->DR = 0x0A;
+				indexUsartTX1++;
+				break;
+			case 8:
+				USART1->DR = 0x0D;
+				indexUsartTX1=0;
+				break;
+			default:
+				indexUsartTX1=0;
+				break;
+		}
+	}
+	
+}
+void controlLoop(void){
+
+	// Verificacion de referencia
+	if( !(GPIOB->IDR & GPIO_IDR_IDR12) ){
+		ref=newRef;
+	}
+
+	// Recepcion de datos UART-sensor
+	if(USART3->SR & USART_SR_RXNE){						
+		inUSARTdata3=USART3->DR;
+		switch(indexUsartRX3){
+			case 0:
+				if(inUSARTdata3==0xF0) indexUsartRX3++;
+				break;
+			case 1:
+				if(inUSARTdata3==0xF0) indexUsartRX3++;
+				break;
+			case 2:
+				if(inUSARTdata3==0xF0) indexUsartRX3++;
+				break;
+			case 3:
+				sensorInputDataTemp=0;
+				sensorInputDataTemp=inUSARTdata3<<8;
+				indexUsartRX3++;
+				break;
+			case 4:
+				sensorInputDataTemp+=inUSARTdata3;
+
+				// Filtro
+				sensorInputDataArray[sensorInputDataArrayPointeri]=sensorInputDataOffSet-sensorInputDataTemp;
+				sensorInputDataArrayPointeri = (sensorInputDataArrayPointeri<9) ? sensorInputDataArrayPointeri +1 : 0; 
+				initLoopCounter++;
+				sensorInputData=0;
+				for(int i=0;i<10;i++){
+					sensorInputData+=sensorInputDataArray[i];
+				}
+				sensorInputData=sensorInputData/10;
+
+				indexUsartRX3=0;
+				break;
+			default:
+				indexUsartRX3=0;
+				break;
+		}
+
+	}
+	// Recepcion de datos UART-UI
+	if(USART1->SR & USART_SR_RXNE){						
+		inUSARTdata1=USART1->DR;
+		
+
+	}
+	// Transmision de datos UART-UI
+	if(sendDataUartFlag==1){
+		if(ref==newRef){
+			if(USART1->SR & USART_SR_TC){						
+				switch(indexUsartTX1){
+					case 0:
+						USART1->DR ='N';
+						indexUsartTX1++;
+						break;
+					case 1:
+						USART1->DR ='R';
+						indexUsartTX1++;
+						break;
+					case 2:
+						USART1->DR =':';
+						indexUsartTX1++;
+						break;
+					case 3:
+						USART1->DR = ((int)sensorInputData/1000)+48;
+						indexUsartTX1++;
+						break;
+					case 4:
+						USART1->DR = (((int)sensorInputData%1000)/100)+48;
+						indexUsartTX1++;
+						break;
+					case 5:
+						USART1->DR = ((((int)sensorInputData%1000)%100)/10)+48;
+						indexUsartTX1++;
+						break;
+					case 6:
+						USART1->DR = ((((int)sensorInputData%1000)%100)%10)+48;
+						indexUsartTX1++;
+						break;
+					case 7:
+						USART1->DR = 0x0A;
+						indexUsartTX1++;
+						break;
+					case 8:
+						USART1->DR = 0x0D;
+						indexUsartTX1=0;
+						sendDataUartFlag=0;
+						break;
+					default:
+						indexUsartTX1=0;
+						break;
+				}
+			}
+		}else{
+			if(USART1->SR & USART_SR_TC){						
+				switch(indexUsartTX1){
+					case 0:
+						USART1->DR ='P';
+						indexUsartTX1++;
+						break;
+					case 1:
+						USART1->DR ='R';
+						indexUsartTX1++;
+						break;
+					case 2:
+						USART1->DR =':';
+						indexUsartTX1++;
+						break;
+					case 3:
+						USART1->DR = ((int)sensorInputData/1000)+48;
+						indexUsartTX1++;
+						break;
+					case 4:
+						USART1->DR = (((int)sensorInputData%1000)/100)+48;
+						indexUsartTX1++;
+						break;
+					case 5:
+						USART1->DR = ((((int)sensorInputData%1000)%100)/10)+48;
+						indexUsartTX1++;
+						break;
+					case 6:
+						USART1->DR = ((((int)sensorInputData%1000)%100)%10)+48;
+						indexUsartTX1++;
+						break;
+					case 7:
+						USART1->DR = 0x0A;
+						indexUsartTX1++;
+						break;
+					case 8:
+						USART1->DR = 0x0D;
+						indexUsartTX1=0;
+						sendDataUartFlag=0;
+						break;
+					default:
+						indexUsartTX1=0;
+						break;
+				}
+			}
+
+		}
+	}
+	// Lectura ADC
+	if(ADC1->SR & ADC_SR_EOC){							// EOC=1? Preguntar si ya termino la conversion
+		value=ADC1->DR & ADC_DR_DATA;					// :DATA, Almacenar los datos de la conversion
+		//ref=refOffSet+(value/16);						// Modificacionde referencia
+	};
+
+	// Muestreo 
+	if(SysTick->CTRL & SysTick_CTRL_COUNTFLAG_Msk || Ti==0){
+		SysTick->CTRL &=~SysTick_CTRL_ENABLE_Msk;				// Enable=0, Deshabilitar el contador
+		SysTick->LOAD =(10*9)-1;								// Contador
+		SysTick->CTRL |=SysTick_CTRL_ENABLE_Msk;				// Enable=1, Habilitar contador
+		if(Ti==Ts*100){
+			Ti=0;
+			GPIOC->ODR ^= GPIO_ODR_ODR13;
+			// Control PID
+
+			sum+=error;
+			error=ref-sensorInputData;
+			out= kp*(error)+ (ki*kp*(Ts/1000)*sum)+kd*(error-pastError);
+			
+			pastError=error;
+
+			if(out >(PWMmax-PWMzero)){
+				out = PWMmax-PWMzero;
+			}else if(out<0){
+				out = 0;
+			}
+
+			TIM3->CCR4 =PWMzero+ out;
+
+			// Habilitar mandar datos por UART
+
+			sendDataUartFlag=1;
+		}else{
+			Ti++;
+		}
+	}
+}
+
 //void USART1_IRQHandler(void){
 //	if(USART1->SR & USART_SR_RXNE){
-//		inUSARTdata=USART1->DR;								// Almacenar dato de entrada
+//		inUSARTdata3=USART1->DR;								// Almacenar dato de entrada
 //
 //	}
 //}
