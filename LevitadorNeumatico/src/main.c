@@ -3,6 +3,8 @@
 #include <stm32f103xb.h>
 #include <stdlib.h>
 
+
+
 //#define motorOut TIM3->CCR4
 unsigned short value=0;
 unsigned int indexUsartRX3=0;
@@ -13,7 +15,7 @@ int inUSARTdata1;
 int inUSARTdata3;
 int L;
 float sensorInputData;
-int PWMzero=890;
+int PWMzero=870;
 int PWMmax=950;
 float sensorInputDataOffSet;
 float sensorInputDataArray[10];		
@@ -23,19 +25,28 @@ unsigned int sendDataUartFlag=0;
 int sensorInputDataTemp;
 
 // Variables controlador
-float kp=0.23; 
+float kp=0.3; 
 float ki=0;
 float kd=0;
+float errorArray[500];
+int errorArrayPointer=0;
+int errorArrayPointerMax=499;
 float error=0;
 float sum=0;
 unsigned int Ts=50;
 
-// para ref (300) kp=0.2
-// para ref (100,250) kp=0.23
-// para ref (50) kp=0.4
+
+
+// P1: 40  kp:0.7 ref:100
+// P2: 80  kp:0.2 ref:270
+// P3: 120 kp:0.3 ref:260
+// P4: 160 kp:0.3 ref:300
+// P5: 200 kp:0.3 ref:350
+// P6: 240 kp:0.3 ref:380
+// P7: 280 kp:0.3 ref:420
 
 float pastError=0;
-int ref=300;
+int ref=160;
 int newRef=200;
 float out=0;
 unsigned short refOffSet=100;
@@ -182,8 +193,15 @@ int main(void){
 //-----------------------------------------------------------------------------------------------------
 
 	TIM3->CCR4 =PWMzero;									// Iniciar con el ventilador apagado
+	TIM3->CCR4 =PWMmax;
+	TIM3->CCR4 =PWMzero;
+	
 	//NVIC_EnableIRQ(USART1_IRQn);							// Habilitar interrupcion de USART1
-
+	
+	// Inicilizacion del arreglo del integrador:
+	for(int i=0;i<errorArrayPointerMax;i++){
+		errorArray[i]=0;
+	}
 	while(1){
 		if(initLoopCounter<50){
 			initializationLoop();
@@ -207,7 +225,9 @@ int main(void){
 			USART1->DR =0x0A;
 			while(!(USART1->SR & USART_SR_TC));
 			USART1->DR =0x0D;
+
 			controlLoop();
+			//TIM3->CCR4 =PWMmax;
 			initLoopCounter++;
 		}else{
 			controlLoop();
@@ -288,34 +308,26 @@ void initializationLoop(void){
 				indexUsartTX1++;
 				break;
 			case 1:
-				USART1->DR ='M';
-				indexUsartTX1++;
-				break;
-			case 2:
-				USART1->DR =',';
-				indexUsartTX1++;
-				break;
-			case 3:
 				USART1->DR = ((int)sensorInputData/1000)+48;
 				indexUsartTX1++;
 				break;
-			case 4:
+			case 2:
 				USART1->DR = (((int)sensorInputData%1000)/100)+48;
 				indexUsartTX1++;
 				break;
-			case 5:
+			case 3:
 				USART1->DR = ((((int)sensorInputData%1000)%100)/10)+48;
 				indexUsartTX1++;
 				break;
-			case 6:
+			case 4:
 				USART1->DR = ((((int)sensorInputData%1000)%100)%10)+48;
 				indexUsartTX1++;
 				break;
-			case 7:
+			case 5:
 				USART1->DR = 0x0A;
 				indexUsartTX1++;
 				break;
-			case 8:
+			case 6:
 				USART1->DR = 0x0D;
 				indexUsartTX1=0;
 				break;
@@ -384,15 +396,15 @@ void controlLoop(void){
 			if(USART1->SR & USART_SR_TC){						
 				switch(indexUsartTX1){
 					case 0:
-						USART1->DR ='N';
+						USART1->DR ='P';
 						indexUsartTX1++;
 						break;
 					case 1:
-						USART1->DR ='R';
+						USART1->DR ='M';
 						indexUsartTX1++;
 						break;
-					case 2:
-						USART1->DR =':';
+				    case 2:
+						USART1->DR =' ';
 						indexUsartTX1++;
 						break;
 					case 3:
@@ -412,10 +424,30 @@ void controlLoop(void){
 						indexUsartTX1++;
 						break;
 					case 7:
+						USART1->DR =' ';
+						indexUsartTX1++;
+						break;					
+					case 8:
+						USART1->DR = (((int)out)/1000)+48;
+						indexUsartTX1++;
+						break;
+					case 9:
+						USART1->DR = ((((int)out)%1000)/100)+48;
+						indexUsartTX1++;
+						break;
+					case 10:
+						USART1->DR = (((((int)out)%1000)%100)/10)+48;
+						indexUsartTX1++;
+						break;
+					case 11:
+						USART1->DR = (((((int)out)%1000)%100)%10)+48;
+						indexUsartTX1++;
+						break;
+					case 12:
 						USART1->DR = 0x0A;
 						indexUsartTX1++;
 						break;
-					case 8:
+					case 13:
 						USART1->DR = 0x0D;
 						indexUsartTX1=0;
 						sendDataUartFlag=0;
@@ -426,6 +458,7 @@ void controlLoop(void){
 				}
 			}
 		}else{
+
 			if(USART1->SR & USART_SR_TC){						
 				switch(indexUsartTX1){
 					case 0:
@@ -437,7 +470,7 @@ void controlLoop(void){
 						indexUsartTX1++;
 						break;
 					case 2:
-						USART1->DR =':';
+						USART1->DR =' ';
 						indexUsartTX1++;
 						break;
 					case 3:
@@ -457,10 +490,30 @@ void controlLoop(void){
 						indexUsartTX1++;
 						break;
 					case 7:
+						USART1->DR =' ';
+						indexUsartTX1++;
+						break;					
+					case 8:
+						USART1->DR = (((int)out)/1000)+48;
+						indexUsartTX1++;
+						break;
+					case 9:
+						USART1->DR = ((((int)out)%1000)/100)+48;
+						indexUsartTX1++;
+						break;
+					case 10:
+						USART1->DR = (((((int)out)%1000)%100)/10)+48;
+						indexUsartTX1++;
+						break;
+					case 11:
+						USART1->DR = (((((int)out)%1000)%100)%10)+48;
+						indexUsartTX1++;
+						break;
+					case 12:
 						USART1->DR = 0x0A;
 						indexUsartTX1++;
 						break;
-					case 8:
+					case 13:
 						USART1->DR = 0x0D;
 						indexUsartTX1=0;
 						sendDataUartFlag=0;
@@ -487,18 +540,41 @@ void controlLoop(void){
 		if(Ti==Ts*100){
 			Ti=0;
 			GPIOC->ODR ^= GPIO_ODR_ODR13;
+
 			// Control PID
 
-			sum+=error;
-			error=ref-sensorInputData;
-			out= kp*(error)+ (ki*kp*(Ts/1000)*sum)+kd*(error-pastError);
+			// sum+=error;
+			// error=ref-sensorInputData;
 			
-			pastError=error;
+			// // Integrador:
+			
+			// if(errorArrayPointer<errorArrayPointerMax){
+			// 	errorArrayPointer++;
+			// }else{
+			// 	errorArrayPointer=0;
+			// }
+			// sum=sum-errorArray[errorArrayPointer];
+			// errorArray[errorArrayPointer]=error;
+			// sum+=errorArray[errorArrayPointer];
 
-			if(out >(PWMmax-PWMzero)){
-				out = PWMmax-PWMzero;
-			}else if(out<0){
-				out = 0;
+
+			// out= kp*(error)+ (ki*kp*(Ts/1000)*sum)+ ((kd*kp*1000*(error-pastError))/Ts);
+			
+			// pastError=error;
+
+			// if(out >(PWMmax-PWMzero)){
+			// 	out = PWMmax-PWMzero;
+			// }else if(out<0){
+			// 	out = 0;
+			// }
+
+			// Controlador ON-OFF
+			error=ref-sensorInputData;
+
+			if(error<5){
+				out=2;				
+			}else if(error>5){
+				out=58;
 			}
 
 			TIM3->CCR4 =PWMzero+ out;
