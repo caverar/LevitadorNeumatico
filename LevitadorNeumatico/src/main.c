@@ -25,14 +25,22 @@ unsigned int sendDataUartFlag=0;
 int sensorInputDataTemp;
 
 // Variables controlador
-float kp=0.3; 
-float ki=0;
-float kd=0;
-float errorArray[500];
-int errorArrayPointer=0;
+float kp=0.3; 												// Constante proporcionAL
+float ki=0;													// Constante Integral
+float kd=0;													// Constante derivativa
+float kn=0;													// Constante del filtro derivativo
+int finiteIntegratorWindowsEnable=0;						// Selector de tipo de ventana de integracion de Ki 
+int finiteDerivativeWindowsEnable=0;						// Selector de tipo de ventana de integracion de Kd 
+float errorArray[500];										// Arreglo de error
+float derivativeArray[500];									// Arreglo del derivativo
+float derivative=0;											// Componnte derivativa
+int errorArrayPointer=0;									
 int errorArrayPointerMax=499;
+int derivativeArrayPointer=0;
+int derivativeArrayPointerMax=499;
 float error=0;
-float sum=0;
+float integratorSum=0;
+float derivativeSum=0;
 unsigned int Ts=50;
 
 
@@ -543,32 +551,54 @@ void controlLoop(void){
 
 			// Control PID
 
-			// sum+=error;
-			// error=ref-sensorInputData;
 			
-			// // Integrador:
+			error=ref-sensorInputData;
 			
-			// if(errorArrayPointer<errorArrayPointerMax){
-			// 	errorArrayPointer++;
-			// }else{
-			// 	errorArrayPointer=0;
-			// }
-			// sum=sum-errorArray[errorArrayPointer];
-			// errorArray[errorArrayPointer]=error;
-			// sum+=errorArray[errorArrayPointer];
+			// Integrador:
+			integratorSum+=error;
+			if(finiteIntegratorWindowsEnable){
+				if(errorArrayPointer<errorArrayPointerMax){
+					errorArrayPointer++;
+				}else{
+					errorArrayPointer=0;
+				}
+				integratorSum=integratorSum-errorArray[errorArrayPointer];
+				errorArray[errorArrayPointer]=error;
+				integratorSum+=errorArray[errorArrayPointer];
+			}else{
+				integratorSum+=error;
+			}
 
+			// Derivador:
 
-			// out= kp*(error)+ (ki*kp*(Ts/1000)*sum)+ ((kd*kp*1000*(error-pastError))/Ts);
+			if(finiteDerivativeWindowsEnable){
+				if(derivativeArrayPointer<derivativeArrayPointerMax){
+					derivativeArrayPointer++;
+				}else{
+					derivativeArrayPointer=0;
+				}
+				derivative=kn*((error*kd)-((Ts/1000)*derivativeSum));
+				derivativeSum=derivativeSum-derivativeArray[derivativeArrayPointer];
+				
+				derivativeArray[derivativeArrayPointer]=derivative;
+				derivativeSum+=derivativeArray[derivativeArrayPointer];
+			}else{
+				derivative=kd*(1000/Ts)*(error-pastError);
+				pastError=error; 
+			}
+			// salida 
+			out= kp*(error)+ (ki*(Ts/1000)*integratorSum)+ derivative;
 			
-			// pastError=error;
+			pastError=error;
 
-			// if(out >(PWMmax-PWMzero)){
-			// 	out = PWMmax-PWMzero;
-			// }else if(out<0){
-			// 	out = 0;
-			// }
+			if(out >(PWMmax-PWMzero)){
+				out = PWMmax-PWMzero;
+			}else if(out<0){
+				out = 0;
+			}
 
 			// Controlador ON-OFF
+			/*
 			error=ref-sensorInputData;
 
 			if(error<5){
@@ -576,6 +606,7 @@ void controlLoop(void){
 			}else if(error>5){
 				out=58;
 			}
+			*/
 
 			TIM3->CCR4 =PWMzero+ out;
 
