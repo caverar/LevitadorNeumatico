@@ -24,11 +24,23 @@ unsigned int USART1index=0;
 unsigned int sendDataUartFlag=0;
 int sensorInputDataTemp;
 
-// Variables controlador
-float kp=0.3; 												// Constante proporcionAL
-float ki=0;													// Constante Integral
-float kd=0;													// Constante derivativa
-float kn=0;													// Constante del filtro derivativo
+
+// Controlador PI-Empirico
+//	kp=0.4
+//	ki=0.1
+
+// Controlador PD-Empirico
+//	kp=0.4
+//	ki=0.1
+//  kd=0.01
+//  kn=2000
+
+float kp=0.3;												// Constante proporcional
+float ki=0.01;												// Constante integral
+float kd=0.01;												// Constante derivativa
+float kn=2000;													// Constante del filtro derivativo
+
+
 int finiteIntegratorWindowsEnable=0;						// Selector de tipo de ventana de integracion de Ki 
 int finiteDerivativeWindowsEnable=0;						// Selector de tipo de ventana de integracion de Kd 
 float errorArray[500];										// Arreglo de error
@@ -54,7 +66,7 @@ unsigned int Ts=50;
 // P7: 280 kp:0.3 ref:420
 
 float pastError=0;
-int ref=160;
+int ref=300;
 int newRef=200;
 float out=0;
 unsigned short refOffSet=100;
@@ -555,7 +567,7 @@ void controlLoop(void){
 			error=ref-sensorInputData;
 			
 			// Integrador:
-			integratorSum+=error;
+
 			if(finiteIntegratorWindowsEnable){
 				if(errorArrayPointer<errorArrayPointerMax){
 					errorArrayPointer++;
@@ -577,17 +589,16 @@ void controlLoop(void){
 				}else{
 					derivativeArrayPointer=0;
 				}
-				derivative=kn*((error*kd)-((Ts/1000)*derivativeSum));
-				derivativeSum=derivativeSum-derivativeArray[derivativeArrayPointer];
-				
+				derivative=kn*((error*kd)-(Ts*derivativeSum/1000));
+				derivativeSum=derivativeSum-derivativeArray[derivativeArrayPointer];				
 				derivativeArray[derivativeArrayPointer]=derivative;
 				derivativeSum+=derivativeArray[derivativeArrayPointer];
 			}else{
-				derivative=kd*(1000/Ts)*(error-pastError);
+				derivative=(kd*1000*(error-pastError))/Ts;
 				pastError=error; 
 			}
 			// salida 
-			out= kp*(error)+ (ki*(Ts/1000)*integratorSum)+ derivative;
+			out= kp*(error)+ (ki*Ts*integratorSum/1000)+ derivative;
 			
 			pastError=error;
 
