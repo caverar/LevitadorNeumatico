@@ -29,7 +29,7 @@ int sensorInputDataTemp;
 //	kp=0.4
 //	ki=0.1
 
-// Controlador PD-Empirico
+// Controlador PID-Empirico
 //	kp=0.4
 //	ki=0.1
 //  kd=0.01
