@@ -388,6 +388,7 @@ void controlLoop(void){
 
 				// Filtro
 				sensorInputDataArray[sensorInputDataArrayPointeri]=sensorInputDataOffSet-sensorInputDataTemp;
+				sensorInputDataArray[sensorInputDataArrayPointeri]=(sensorInputDataArray[sensorInputDataArrayPointeri] <0 ? 0 : sensorInputDataArray[sensorInputDataArrayPointeri]);
 				sensorInputDataArrayPointeri = (sensorInputDataArrayPointeri<9) ? sensorInputDataArrayPointeri +1 : 0; 
 				initLoopCounter++;
 				sensorInputData=0;
@@ -412,139 +413,73 @@ void controlLoop(void){
 	}
 	// Transmision de datos UART-UI
 	if(sendDataUartFlag==1){
-		if(ref==newRef){
-			if(USART1->SR & USART_SR_TC){						
-				switch(indexUsartTX1){
-					case 0:
-						USART1->DR ='P';
-						indexUsartTX1++;
-						break;
-					case 1:
-						USART1->DR ='M';
-						indexUsartTX1++;
-						break;
-				    case 2:
-						USART1->DR =' ';
-						indexUsartTX1++;
-						break;
-					case 3:
-						USART1->DR = ((int)sensorInputData/1000)+48;
-						indexUsartTX1++;
-						break;
-					case 4:
-						USART1->DR = (((int)sensorInputData%1000)/100)+48;
-						indexUsartTX1++;
-						break;
-					case 5:
-						USART1->DR = ((((int)sensorInputData%1000)%100)/10)+48;
-						indexUsartTX1++;
-						break;
-					case 6:
-						USART1->DR = ((((int)sensorInputData%1000)%100)%10)+48;
-						indexUsartTX1++;
-						break;
-					case 7:
-						USART1->DR =' ';
-						indexUsartTX1++;
-						break;					
-					case 8:
-						USART1->DR = (((int)out)/1000)+48;
-						indexUsartTX1++;
-						break;
-					case 9:
-						USART1->DR = ((((int)out)%1000)/100)+48;
-						indexUsartTX1++;
-						break;
-					case 10:
-						USART1->DR = (((((int)out)%1000)%100)/10)+48;
-						indexUsartTX1++;
-						break;
-					case 11:
-						USART1->DR = (((((int)out)%1000)%100)%10)+48;
-						indexUsartTX1++;
-						break;
-					case 12:
-						USART1->DR = 0x0A;
-						indexUsartTX1++;
-						break;
-					case 13:
-						USART1->DR = 0x0D;
-						indexUsartTX1=0;
-						sendDataUartFlag=0;
-						break;
-					default:
-						indexUsartTX1=0;
-						break;
-				}
-			}
-		}else{
 
-			if(USART1->SR & USART_SR_TC){						
-				switch(indexUsartTX1){
-					case 0:
-						USART1->DR ='P';
-						indexUsartTX1++;
-						break;
-					case 1:
-						USART1->DR ='R';
-						indexUsartTX1++;
-						break;
-					case 2:
-						USART1->DR =' ';
-						indexUsartTX1++;
-						break;
-					case 3:
-						USART1->DR = ((int)sensorInputData/1000)+48;
-						indexUsartTX1++;
-						break;
-					case 4:
-						USART1->DR = (((int)sensorInputData%1000)/100)+48;
-						indexUsartTX1++;
-						break;
-					case 5:
-						USART1->DR = ((((int)sensorInputData%1000)%100)/10)+48;
-						indexUsartTX1++;
-						break;
-					case 6:
-						USART1->DR = ((((int)sensorInputData%1000)%100)%10)+48;
-						indexUsartTX1++;
-						break;
-					case 7:
-						USART1->DR =' ';
-						indexUsartTX1++;
-						break;					
-					case 8:
-						USART1->DR = (((int)out)/1000)+48;
-						indexUsartTX1++;
-						break;
-					case 9:
-						USART1->DR = ((((int)out)%1000)/100)+48;
-						indexUsartTX1++;
-						break;
-					case 10:
-						USART1->DR = (((((int)out)%1000)%100)/10)+48;
-						indexUsartTX1++;
-						break;
-					case 11:
-						USART1->DR = (((((int)out)%1000)%100)%10)+48;
-						indexUsartTX1++;
-						break;
-					case 12:
-						USART1->DR = 0x0A;
-						indexUsartTX1++;
-						break;
-					case 13:
-						USART1->DR = 0x0D;
-						indexUsartTX1=0;
-						sendDataUartFlag=0;
-						break;
-					default:
-						indexUsartTX1=0;
-						break;
-				}
+		if(USART1->SR & USART_SR_TC){						
+			switch(indexUsartTX1){
+				case 0:
+					USART1->DR ='P';
+					indexUsartTX1++;
+					break;
+				case 1:
+					USART1->DR ='R';
+					indexUsartTX1++;
+					break;
+				case 2:
+					USART1->DR =' ';
+					indexUsartTX1++;
+					break;
+				case 3:
+					USART1->DR = ((int)sensorInputData/1000)+48;
+					indexUsartTX1++;
+					break;
+				case 4:
+					USART1->DR = (((int)sensorInputData%1000)/100)+48;
+					indexUsartTX1++;
+					break;
+				case 5:
+					USART1->DR = ((((int)sensorInputData%1000)%100)/10)+48;
+					indexUsartTX1++;
+					break;
+				case 6:
+					USART1->DR = ((((int)sensorInputData%1000)%100)%10)+48;
+					indexUsartTX1++;
+					break;
+				case 7:
+					USART1->DR =' ';
+					indexUsartTX1++;
+					break;					
+				case 8:
+					USART1->DR = (((int)out)/1000)+48;
+					indexUsartTX1++;
+					break;
+				case 9:
+					USART1->DR = ((((int)out)%1000)/100)+48;
+					indexUsartTX1++;
+					break;
+				case 10:
+					USART1->DR = (((((int)out)%1000)%100)/10)+48;
+					indexUsartTX1++;
+					break;
+				case 11:
+					USART1->DR = (((((int)out)%1000)%100)%10)+48;
+					indexUsartTX1++;
+					break;
+				case 12:
+					USART1->DR = 0x0A;
+					indexUsartTX1++;
+					break;
+				case 13:
+					USART1->DR = 0x0D;
+					indexUsartTX1=0;
+					sendDataUartFlag=0;
+					break;
+				default:
+					indexUsartTX1=0;
+					break;
 			}
-
 		}
+
+		
 	}
 	// Lectura ADC
 	if(ADC1->SR & ADC_SR_EOC){							// EOC=1? Preguntar si ya termino la conversion
@@ -602,22 +537,25 @@ void controlLoop(void){
 			
 			pastError=error;
 
-			if(out >(PWMmax-PWMzero)){
-				out = PWMmax-PWMzero;
-			}else if(out<0){
-				out = 0;
-			}
+
 
 			// Controlador ON-OFF
 			/*
 			error=ref-sensorInputData;
 
 			if(error<5){
-				out=2;				
+				out=PWMmax-PWMzero;				
 			}else if(error>5){
-				out=58;
+				out=0;
 			}
 			*/
+
+			if(out >(PWMmax-PWMzero)){
+				out = PWMmax-PWMzero;
+			}else if(out<0){
+				out = 0;
+			}
+
 
 			TIM3->CCR4 =PWMzero+ out;
 
