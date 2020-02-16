@@ -8,7 +8,8 @@
 //#define motorOut TIM3->CCR4
 unsigned short value=0;
 unsigned int indexUsartRX3=0;
-unsigned int indexUsartTX1=1;
+unsigned int indexUsartTX1=0;
+unsigned int indexUsartRX1=0;
 
 
 int inUSARTdata1;
@@ -38,7 +39,7 @@ int sensorInputDataTemp;
 float kp=0.3;												// Constante proporcional
 float ki=0.01;												// Constante integral
 float kd=0.01;												// Constante derivativa
-float kn=2000;													// Constante del filtro derivativo
+float kn=2000;												// Constante del filtro derivativo
 
 
 int finiteIntegratorWindowsEnable=0;						// Selector de tipo de ventana de integracion de Ki 
@@ -67,12 +68,19 @@ unsigned int Ts=50;
 
 float pastError=0;
 int ref=300;
-int newRef=200;
+int newRef=0;
 float out=0;
 unsigned short refOffSet=100;
 
 unsigned int Ti=0;
 unsigned int initLoopCounter=0;
+
+unsigned int SystemEnable=1;
+unsigned int ControlMode=1;
+float newKp=0;
+float newKi=0;
+float newKd=0;
+float newKn=0;
 
 void controlLoop(void);
 void initializationLoop(void);
@@ -360,10 +368,7 @@ void initializationLoop(void){
 }
 void controlLoop(void){
 
-	// Verificacion de referencia
-	if( !(GPIOB->IDR & GPIO_IDR_IDR12) ){
-		ref=newRef;
-	}
+
 
 	// Recepcion de datos UART-sensor
 	if(USART3->SR & USART_SR_RXNE){						
@@ -405,10 +410,97 @@ void controlLoop(void){
 		}
 
 	}
+
+	
+
 	// Recepcion de datos UART-UI
 	if(USART1->SR & USART_SR_RXNE){						
 		inUSARTdata1=USART1->DR;
-		
+		switch(indexUsartRX1){
+			case 0:
+				if(inUSARTdata1==0xF0) indexUsartRX1++;
+				break;
+			case 1:
+				if(inUSARTdata1==0xF0) indexUsartRX1++;
+				break;
+			// Habilitar sistema
+			case 2:
+				SystemEnable=inUSARTdata1;
+				indexUsartRX1++;
+				break;
+			// Cambiar controlador
+			case 3:
+				ControlMode=inUSARTdata1;
+				indexUsartRX1++;
+				break;
+			// Referencia
+			case 4:
+				newRef=0;
+				newRef=inUSARTdata1;
+				indexUsartRX1++;
+				break;
+			case 5:
+				newRef+=inUSARTdata1<<8;
+				ref=newRef;
+				indexUsartRX1++;
+				break;
+			// Muestreo
+			case 6:
+				Ts=inUSARTdata1;
+				indexUsartRX1++;
+				break;
+			// Kp
+			case 7:
+				newKp=0;
+				newKp=inUSARTdata1;
+				indexUsartRX1++;
+				break;
+			case 8:
+				newKp+=(inUSARTdata1<<8);
+				kp=newKp/1000;
+				indexUsartRX1++;
+				break;
+			// Ki
+			case 9:
+				newKi=0;
+				newKi=inUSARTdata1;
+				indexUsartRX1++;
+				break;
+			case 10:
+				newKi+=(inUSARTdata1<<8);
+				ki=newKi/1000;
+				indexUsartRX1++;
+				break;
+			// Kd
+			case 11:
+				newKd=0;
+				newKd=inUSARTdata1;
+				indexUsartRX1++;
+				break;
+			case 12:
+				newKd+=(inUSARTdata1<<8);
+				kd=newKd/1000;
+				indexUsartRX1++;
+				break;
+			// Kn
+			case 13:
+				newKn=0;
+				newKn=inUSARTdata1;
+				indexUsartRX1++;
+				break;
+			case 14:
+				newKn+=(inUSARTdata1<<8);
+				kn=newKn/1000;
+				indexUsartRX1++;
+				break;
+			// final de linea
+			case 15:
+				indexUsartRX1=0;
+				break;
+			default:
+				indexUsartRX1=0;
+				break;
+		}
 
 	}
 	// Transmision de datos UART-UI
@@ -482,86 +574,83 @@ void controlLoop(void){
 		
 	}
 	// Lectura ADC
-	if(ADC1->SR & ADC_SR_EOC){							// EOC=1? Preguntar si ya termino la conversion
-		value=ADC1->DR & ADC_DR_DATA;					// :DATA, Almacenar los datos de la conversion
-		//ref=refOffSet+(value/16);						// Modificacionde referencia
+	if(ADC1->SR & ADC_SR_EOC){								// EOC=1? Preguntar si ya termino la conversion
+		value=ADC1->DR & ADC_DR_DATA;						// :DATA, Almacenar los datos de la conversion
+		//ref=refOffSet+(value/16);							// Modificacionde referencia
 	};
 
 	// Muestreo 
 	if(SysTick->CTRL & SysTick_CTRL_COUNTFLAG_Msk || Ti==0){
-		SysTick->CTRL &=~SysTick_CTRL_ENABLE_Msk;				// Enable=0, Deshabilitar el contador
-		SysTick->LOAD =(10*9)-1;								// Contador
-		SysTick->CTRL |=SysTick_CTRL_ENABLE_Msk;				// Enable=1, Habilitar contador
+		SysTick->CTRL &=~SysTick_CTRL_ENABLE_Msk;			// Enable=0, Deshabilitar el contador
+		SysTick->LOAD =(10*9)-1;							// Contador
+		SysTick->CTRL |=SysTick_CTRL_ENABLE_Msk;			// Enable=1, Habilitar contador
 		if(Ti==Ts*100){
 			Ti=0;
 			GPIOC->ODR ^= GPIO_ODR_ODR13;
 
-			// Control PID
+			if(SystemEnable){				
+				if(ControlMode){							// Control PID
+				
+					error=ref-sensorInputData;
+					
+					// Integrador:
 
-			
-			error=ref-sensorInputData;
-			
-			// Integrador:
+					if(finiteIntegratorWindowsEnable){
+						if(errorArrayPointer<errorArrayPointerMax){
+							errorArrayPointer++;
+						}else{
+							errorArrayPointer=0;
+						}
+						integratorSum=integratorSum-errorArray[errorArrayPointer];
+						errorArray[errorArrayPointer]=error;
+						integratorSum+=errorArray[errorArrayPointer];
+					}else{
+						integratorSum+=error;
+					}
 
-			if(finiteIntegratorWindowsEnable){
-				if(errorArrayPointer<errorArrayPointerMax){
-					errorArrayPointer++;
-				}else{
-					errorArrayPointer=0;
+					// Derivador:
+
+					if(finiteDerivativeWindowsEnable){
+						if(derivativeArrayPointer<derivativeArrayPointerMax){
+							derivativeArrayPointer++;
+						}else{
+							derivativeArrayPointer=0;
+						}
+						derivative=kn*((error*kd)-(Ts*derivativeSum/1000));
+						derivativeSum=derivativeSum-derivativeArray[derivativeArrayPointer];				
+						derivativeArray[derivativeArrayPointer]=derivative;
+						derivativeSum+=derivativeArray[derivativeArrayPointer];
+					}else{
+						derivative=(kd*1000*(error-pastError))/Ts;
+						pastError=error; 
+					}
+					// salida 
+					out= kp*(error)+ (ki*Ts*integratorSum/1000)+ derivative;
+					
+					pastError=error;
+
+				}else{										//Controlador ON-OFF						
+					error=ref-sensorInputData;
+					if(error>5){
+						out=PWMmax-PWMzero;				
+					}else if(error<5){
+						out=0;
+					}					
 				}
-				integratorSum=integratorSum-errorArray[errorArrayPointer];
-				errorArray[errorArrayPointer]=error;
-				integratorSum+=errorArray[errorArrayPointer];
-			}else{
-				integratorSum+=error;
-			}
 
-			// Derivador:
-
-			if(finiteDerivativeWindowsEnable){
-				if(derivativeArrayPointer<derivativeArrayPointerMax){
-					derivativeArrayPointer++;
-				}else{
-					derivativeArrayPointer=0;
+				// Limitador de saturacion
+				if(out >(PWMmax-PWMzero)){
+					out = PWMmax-PWMzero;
+				}else if(out<0){
+					out = 0;
 				}
-				derivative=kn*((error*kd)-(Ts*derivativeSum/1000));
-				derivativeSum=derivativeSum-derivativeArray[derivativeArrayPointer];				
-				derivativeArray[derivativeArrayPointer]=derivative;
-				derivativeSum+=derivativeArray[derivativeArrayPointer];
+
+				TIM3->CCR4 =PWMzero+ out;				
+				sendDataUartFlag=1;							// Habilitar mandar datos por UART
+
 			}else{
-				derivative=(kd*1000*(error-pastError))/Ts;
-				pastError=error; 
+				TIM3->CCR4 =PWMzero;
 			}
-			// salida 
-			out= kp*(error)+ (ki*Ts*integratorSum/1000)+ derivative;
-			
-			pastError=error;
-
-
-
-			// Controlador ON-OFF
-			/*
-			error=ref-sensorInputData;
-
-			if(error<5){
-				out=PWMmax-PWMzero;				
-			}else if(error>5){
-				out=0;
-			}
-			*/
-
-			if(out >(PWMmax-PWMzero)){
-				out = PWMmax-PWMzero;
-			}else if(out<0){
-				out = 0;
-			}
-
-
-			TIM3->CCR4 =PWMzero+ out;
-
-			// Habilitar mandar datos por UART
-
-			sendDataUartFlag=1;
 		}else{
 			Ti++;
 		}
@@ -570,7 +659,7 @@ void controlLoop(void){
 
 //void USART1_IRQHandler(void){
 //	if(USART1->SR & USART_SR_RXNE){
-//		inUSARTdata3=USART1->DR;								// Almacenar dato de entrada
+//		inUSARTdata3=USART1->DR;							// Almacenar dato de entrada
 //
 //	}
 //}
